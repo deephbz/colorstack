@@ -1,0 +1,14 @@
+[project]
+name = "colorstack"
+version = "0.1.0"
+description = "Derive application theme payloads from one authored palette"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
