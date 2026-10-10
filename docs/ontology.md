@@ -35,7 +35,15 @@ splice regions, inspect existing config, or infer installation targets.
   it reaches a contrast floor.
 - `soften(color, bg, ceiling)` moves a color toward the surface until it stays
   below a comfort ceiling.
-- `build(palette, ink_contrast)` creates a Theme.
+- `repair_on(color, surfaces, floor)` repairs against every surface a role is
+  drawn on; the strictest surface wins.
+- `build(palette, ink_contrast)` creates a Theme. It solves surfaces first:
+  selection and alt tiers are softened under the panel ceiling, and tool
+  panels are tinted from the accents. It then repairs every foreground on
+  every surface in `Theme.surfaces`.
+
+OKLCH encoding reduces chroma to the sRGB gamut at fixed lightness and hue.
+A per-channel clamp would move the hue.
 - `gen.py` renders a fresh output bundle at an explicit path.
 - `switch.py` atomically replaces only an explicit bundle that an existing
   manifest proves Colorstack owns.

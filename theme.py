@@ -47,6 +47,7 @@ from colorspace import (
     lstar,
     mix_oklab,
     repair,
+    repair_on,
     soften,
 )
 from palettes import Palette
@@ -78,11 +79,18 @@ class Theme:
     bg_soft: str
     bg_alt: str
     bg_hi: str
+    panels: dict[str, str]  # intent-tinted panels: "pending", "success", "error"
     source: Palette
 
     @property
     def is_light(self) -> bool:
         return lstar(self.bg) > 50
+
+    @property
+    def surfaces(self) -> tuple[str, ...]:
+        """Every surface a foreground role may be drawn on. bg_hi is excluded:
+        emitters use it as a highlight or page colour, not under text roles."""
+        return (self.bg, self.bg_soft, self.bg_alt, self.selection_bg, *self.panels.values())
 
     def as_dict(self) -> dict:
         d = {
@@ -103,15 +111,17 @@ class Theme:
     def check(self) -> list[str]:
         """Every legibility claim this theme makes, verified against itself."""
         out = []
-        if contrast(self.fg, self.bg) < FLOORS["text"]:
-            out.append(f"body text {contrast(self.fg, self.bg):.2f}:1 < 4.5")
-        for i in list(range(1, 7)) + list(range(9, 15)):
-            c = contrast(self.ansi[i], self.bg)
-            if c < FLOORS["text"] - 0.01:
-                out.append(f"ansi{i} {self.ansi[i]} is {c:.2f}:1 < 4.5")
-        c8 = contrast(self.ansi[8], self.bg)
-        if c8 < FLOORS["accent"] - 0.01:
-            out.append(f"ansi8 (comments) {c8:.2f}:1 < 3.0")
+        floors = {"body text": (self.fg, FLOORS["text"]), "ansi8 (comments)": (self.ansi[8], FLOORS["accent"])}
+        floors |= {f"ansi{i}": (self.ansi[i], FLOORS["text"]) for i in [*range(1, 7), *range(9, 15)]}
+        for role, (color, floor) in floors.items():
+            for surface in self.surfaces:
+                c = contrast(color, surface)
+                if c < floor - 0.01:
+                    out.append(f"{role} {color} is {c:.2f}:1 < {floor} on {surface}")
+        for name, surface in (("bg_alt", self.bg_alt), ("selection_bg", self.selection_bg)):
+            c = contrast(surface, self.bg)
+            if c > CEILINGS["panel"] + 0.01:
+                out.append(f"{name} is {c:.2f}:1 from bg > {CEILINGS['panel']} -- panel competes with text")
         if lstar(self.bg_soft) < lstar(self.bg):
             out.append("bg_soft is darker than bg -- surface has no headroom")
 
@@ -162,7 +172,8 @@ def build(pal: Palette, ink_contrast: float = 10.0) -> Theme:
     # between schemes is partly a comparison of ink harshness.
     fg = soften(repair(pal.fg, bg, ink_contrast), bg, ink_contrast)
 
-    # Accents at the TEXT floor -- these carry code, not decoration.
+    # Accents at the TEXT floor -- these carry code, not decoration. This pass
+    # is against bg only; it fixes the hues that tint the panels below.
     normal = []
     for role in ANSI_ROLES:
         src = _role(pal, role)
@@ -171,13 +182,23 @@ def build(pal: Palette, ink_contrast: float = 10.0) -> Theme:
         else:
             normal.append(repair(src, bg, FLOORS["text"]))
 
+    # Surfaces first, foregrounds second. A selection or panel tier must read
+    # as a separate area but stay quiet; the scheme's own tier can be far too
+    # loud (Vimbones ships 2.0:1), and every foreground pays for that below.
+    alt = soften(pal.bg_alt or bg, bg, CEILINGS["panel"])
+    selection_bg = soften(pal.bg_alt or pal.bg_soft or bg, bg, CEILINGS["panel"])
+    panels = {
+        "pending": mix_oklab(bg, normal[3], 0.07),
+        "success": mix_oklab(bg, normal[1], 0.07),
+        "error": mix_oklab(bg, normal[0], 0.07),
+    }
+
     # Bright variants. "Bright" means further from the surface in both
     # polarities -- darker on a light theme, lighter on a dark one. Getting
     # this backwards is the single most common light-theme bug, and the naive
     # dark version (leave them equal to 1-6) silently wastes six slots.
     step = darken_oklab if light else lighten_oklab
     bright = [step(c, 0.10) for c in normal]
-    bright = [repair(c, bg, FLOORS["text"]) for c in bright]
     if not light:
         # On dark, pushing brights toward white can send them past comfort.
         bright = [soften(c, bg, CEILINGS["accent"]) for c in bright]
@@ -201,7 +222,7 @@ def build(pal: Palette, ink_contrast: float = 10.0) -> Theme:
     # whose "black" is bright -- boxes and status bars come out inverted.
     if light:
         tier0 = fg
-        tier7 = pal.bg_alt or bg
+        tier7 = alt
         tier15 = pal.bg_hi or white
         hi = tier15
     else:
@@ -209,6 +230,16 @@ def build(pal: Palette, ink_contrast: float = 10.0) -> Theme:
         tier7 = fg
         tier15 = white
         hi = pal.bg_hi if pal.bg_hi and lstar(pal.bg_hi) > lstar(bg) else soft
+
+    # Every foreground on every surface it can be drawn on; the strictest
+    # surface wins. Legibility outranks the comfort ceiling, so this runs last.
+    surfaces = (bg, soft, alt, selection_bg, *panels.values())
+    normal = [repair_on(c, surfaces, FLOORS["text"]) for c in normal]
+    bright = [repair_on(c, surfaces, FLOORS["text"]) for c in bright]
+    dim = repair_on(dim, surfaces, FLOORS["accent"])
+    fg = repair_on(fg, surfaces, FLOORS["text"])
+    if light:
+        tier0 = fg
 
     ansi = [
         tier0,  # 0
@@ -225,13 +256,14 @@ def build(pal: Palette, ink_contrast: float = 10.0) -> Theme:
         bg=bg,
         fg=fg,
         cursor=repair(_role(pal, "red") or fg, bg, FLOORS["text"]),
-        selection_bg=pal.bg_alt or pal.bg_soft or bg,
+        selection_bg=selection_bg,
         selection_fg=fg,
         ansi=ansi,
         dim=dim,
         bg_soft=soft,
-        bg_alt=pal.bg_alt or bg,
+        bg_alt=alt,
         bg_hi=hi,
+        panels=panels,
         source=pal,
     )
 

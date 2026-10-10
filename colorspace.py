@@ -150,6 +150,11 @@ def oklab(color: str | tuple[float, float, float]) -> tuple[float, float, float]
 
 
 def oklab_to_rgb(lab: tuple[float, float, float]) -> tuple[float, float, float]:
+    return tuple(linear_to_srgb(v) for v in _oklab_to_linear(lab))  # type: ignore[return-value]
+
+
+def _oklab_to_linear(lab: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Unclamped linear sRGB; values outside [0, 1] are out of gamut."""
     L, a, b = lab
     l_ = L + 0.3963377774 * a + 0.2158037573 * b
     m_ = L - 0.1055613458 * a - 0.0638541728 * b
@@ -158,7 +163,7 @@ def oklab_to_rgb(lab: tuple[float, float, float]) -> tuple[float, float, float]:
     rl = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
     gl = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
     bl = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
-    return tuple(linear_to_srgb(v) for v in (rl, gl, bl))  # type: ignore[return-value]
+    return (rl, gl, bl)
 
 
 def oklch(color: str | tuple[float, float, float]) -> tuple[float, float, float]:
@@ -166,10 +171,31 @@ def oklch(color: str | tuple[float, float, float]) -> tuple[float, float, float]
     return (L, math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360)
 
 
+def _in_gamut(rgb: tuple[float, float, float], eps: float = 1e-6) -> bool:
+    return all(-eps <= c <= 1 + eps for c in rgb)
+
+
 def oklch_to_hex(lch: tuple[float, float, float]) -> str:
+    """Encode an OKLCH color, reducing chroma until sRGB can display it.
+
+    Lightness and hue are the intent; chroma is what gives way. A per-channel
+    clamp would instead move hue and lightness -- a saturated violet lifted on
+    a dark surface drifts about 9 degrees. This is the OKHSL insight (every
+    lightness/hue pair has a maximum displayable chroma) without OKHSL itself.
+    """
     L, C, h = lch
     rad = math.radians(h)
-    return rgb_to_hex(oklab_to_rgb((L, C * math.cos(rad), C * math.sin(rad))))
+    ca, sa = math.cos(rad), math.sin(rad)
+    if not _in_gamut(_oklab_to_linear((L, C * ca, C * sa))) and 0.0 < L < 1.0:
+        lo, hi = 0.0, C
+        for _ in range(24):
+            mid = (lo + hi) / 2
+            if _in_gamut(_oklab_to_linear((L, mid * ca, mid * sa))):
+                lo = mid
+            else:
+                hi = mid
+        C = lo
+    return rgb_to_hex(oklab_to_rgb((L, C * ca, C * sa)))
 
 
 def mix_oklab(a: str, b: str, t: float) -> str:
@@ -313,6 +339,19 @@ def soften(color: str, bg: str, ceiling: float, steps: int = 96) -> str:
     return best
 
 
+def repair_on(color: str, surfaces: tuple[str, ...], floor: float) -> str:
+    """repair() against every surface `color` is drawn on; the strictest wins.
+
+    A foreground that clears 4.5:1 on the background can fall to 3:1 on a
+    selection or panel tier. repair() only moves away from a surface, and every
+    tier sits on the same side of the ink, so repairing against each in turn
+    never undoes an earlier one.
+    """
+    for bg in sorted(set(surfaces), key=lambda s: contrast(color, s)):
+        color = repair(color, bg, floor)
+    return color
+
+
 def repair_delta(color: str, bg: str, floor: float) -> float:
     """How far repair had to move a color, in L* units. High values mean you
     are looking at repair output rather than at the scheme you chose."""
@@ -335,4 +374,8 @@ def soften_delta(color: str, bg: str, ceiling: float) -> float:
 # legible", it is a light source with a shape. 12.0 is a judgement, not a
 # standard -- WCAG defines no upper bound, because it models legibility and not
 # comfort. Anchored only by preference, and labelled as such.
-CEILINGS = {"text": 12.0, "accent": 12.0}
+#
+# "panel" applies on both polarities: a selection or raised tier must read as a
+# separate area without competing with text. Every foreground must also clear
+# its floor on that tier, so a darker panel costs every accent fidelity.
+CEILINGS = {"text": 12.0, "accent": 12.0, "panel": 1.35}

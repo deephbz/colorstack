@@ -603,9 +603,9 @@ def pi_theme(th: T.Theme) -> str:
         "blue": a[4],
         "magenta": a[5],
         "cyan": a[6],
-        "pendingBg": mix_oklab(th.bg, a[4], 0.07),
-        "successBg": mix_oklab(th.bg, a[2], 0.07),
-        "errorBg": mix_oklab(th.bg, a[1], 0.07),
+        "pendingBg": th.panels["pending"],
+        "successBg": th.panels["success"],
+        "errorBg": th.panels["error"],
     }
     colors = {
         "accent": "blue", "border": "blue", "borderAccent": "cyan", "borderMuted": "dim",
@@ -647,14 +647,17 @@ def herdr(th: T.Theme) -> str:
         panel depth cues.
     """
     a = th.ansi
-    from colorspace import FLOORS, mix_oklab, repair
+    from colorspace import FLOORS, mix_oklab, repair_on
 
     surface0 = mix_oklab(th.bg, th.fg, 0.10)
     surface1 = mix_oklab(th.bg, th.fg, 0.18)
     surface_dim = mix_oklab(th.bg, th.fg, 0.06)
-    overlay0 = repair(mix_oklab(th.bg, th.fg, 0.45), th.bg, FLOORS["accent"])
-    overlay1 = repair(mix_oklab(th.bg, th.fg, 0.60), th.bg, FLOORS["text"])
-    peach = repair(th.source.accents.get("orange", a[3]), th.bg, FLOORS["text"])
+    # Herdr draws these on its own tiers, so they clear floors there too.
+    tiers = (th.bg, surface0, surface1, surface_dim)
+    overlay0 = repair_on(mix_oklab(th.bg, th.fg, 0.45), tiers, FLOORS["accent"])
+    overlay1 = repair_on(mix_oklab(th.bg, th.fg, 0.60), tiers, FLOORS["text"])
+    peach = repair_on(th.source.accents.get("orange", a[3]), tiers, FLOORS["text"])
+    subtext0 = repair_on(th.dim, tiers, FLOORS["text"])
 
     return "\n".join([
         f"# {BANNER}",
@@ -676,7 +679,7 @@ def herdr(th: T.Theme) -> str:
         f'overlay1 = "{overlay1}"',
         f'text = "{th.fg}"',
         # agent labels are read, not decoration: text floor, not accent floor
-        f'subtext0 = "{repair(th.dim, th.bg, FLOORS["text"])}"',
+        f'subtext0 = "{subtext0}"',
         f'accent = "{peach}"',
         f'red = "{a[1]}"',
         f'green = "{a[2]}"',

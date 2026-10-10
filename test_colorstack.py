@@ -32,7 +32,10 @@ from colorspace import (
     luminance,
     oklab,
     oklab_to_rgb,
+    oklch,
+    oklch_to_hex,
     repair,
+    repair_on,
     rgb_to_hex,
     warmth,
     y_from_lstar,
@@ -184,6 +187,47 @@ def test_every_scheme_builds_to_the_same_ink_so_a_comparison_is_fair(pal):
     """
     th = T.build(pal, ink_contrast=10.0)
     assert contrast(th.fg, th.bg) == pytest.approx(10.0, abs=0.15), pal.name
+
+
+# -- gamut and surfaces ---------------------------------------------------
+
+
+def _hue_gap(a: float, b: float) -> float:
+    d = abs(a - b) % 360
+    return min(d, 360 - d)
+
+
+def test_out_of_gamut_oklch_keeps_lightness_and_hue():
+    """A saturated violet lifted on a dark surface used to drift ~9 degrees
+    under a per-channel clamp. Chroma gives way instead."""
+    L, C, h = oklch("#8500ff")
+    L2, C2, h2 = oklch(oklch_to_hex((0.65, C, h)))
+    assert L2 == pytest.approx(0.65, abs=0.005)
+    assert _hue_gap(h, h2) < 1.0
+    assert C2 < C
+
+
+def test_repair_on_clears_the_strictest_surface():
+    surfaces = ("#fbf1c7", "#ebdbb2")
+    fixed = repair_on("#d79921", surfaces, FLOORS["text"])
+    assert all(contrast(fixed, s) >= FLOORS["text"] - 0.01 for s in surfaces)
+
+
+def test_loud_scheme_tier_is_softened_to_a_panel():
+    """Vimbones ships a 2.0:1 alt tier; as a selection it would cost every
+    accent its fidelity, so the theme quiets it first."""
+    from colorspace import CEILINGS
+
+    th = T.build(P.VIMBONES)
+    assert contrast(th.bg_alt, th.bg) <= CEILINGS["panel"] + 0.01
+    assert contrast(th.selection_bg, th.bg) <= CEILINGS["panel"] + 0.01
+
+
+def test_pi_tool_panels_are_theme_surfaces():
+    th = T.build(P.MODUS_OPERANDI_TINTED)
+    tokens = json.loads(gen.pi_theme(th))["vars"]
+    assert tokens["errorBg"] == th.panels["error"]
+    assert th.panels["error"] in th.surfaces
 
 
 # -- polarity (D12) -------------------------------------------------------
