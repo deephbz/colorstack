@@ -657,6 +657,7 @@ def herdr(th: T.Theme) -> str:
     overlay0 = repair_on(mix_oklab(th.bg, th.fg, 0.45), tiers, FLOORS["accent"])
     overlay1 = repair_on(mix_oklab(th.bg, th.fg, 0.60), tiers, FLOORS["text"])
     peach = repair_on(th.source.accents.get("orange", a[3]), tiers, FLOORS["text"])
+    focus = repair_on(a[4], tiers, FLOORS["text"])
     subtext0 = repair_on(th.dim, tiers, FLOORS["text"])
 
     return "\n".join([
@@ -680,7 +681,8 @@ def herdr(th: T.Theme) -> str:
         f'text = "{th.fg}"',
         # agent labels are read, not decoration: text floor, not accent floor
         f'subtext0 = "{subtext0}"',
-        f'accent = "{peach}"',
+        # Focused pane frames use blue to stand apart from neutral borders.
+        f'accent = "{focus}"',
         f'red = "{a[1]}"',
         f'green = "{a[2]}"',
         f'yellow = "{a[3]}"',
