@@ -10,6 +10,8 @@ prose, which is the thing the whole setup exists to avoid.
 from __future__ import annotations
 
 import json
+import os
+import pwd
 import subprocess
 import sys
 from pathlib import Path
@@ -441,3 +443,12 @@ def test_switch_replaces_only_a_proven_colorstack_bundle(tmp_path):
     assert refused.returncode != 0
     assert "not an intact Colorstack output bundle" in refused.stderr
     assert json.loads((bundle / ".colorstack-manifest.json").read_text())["scheme"] == "vimbones"
+
+
+# -- test HOME isolation -----------------------------------------------------
+
+
+def test_tests_run_in_a_fresh_home():
+    operator = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    assert Path.home().resolve() != operator
+    assert Path.home().name.startswith("colorstack-test-home-")
